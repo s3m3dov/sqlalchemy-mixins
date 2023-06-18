@@ -1,6 +1,6 @@
-from .utils import classproperty
-from .session import SessionMixin
 from .inspection import InspectionMixin
+from .session import SessionMixin
+from .utils import classproperty
 
 
 class ModelNotFoundError(ValueError):
@@ -24,15 +24,18 @@ class ActiveRecordMixin(InspectionMixin, SessionMixin):
         return self
 
     def save(self):
-        """Saves the updated model to the current entity db.
-        """
+        """Saves the updated model to the current entity db."""
+        session = self.scoped_session()
         try:
-            self.session.add(self)
-            self.session.commit()
+            session.add(self)
+            session.commit()
+            session.refresh(self)
             return self
         except:
-            self.session.rollback()
+            session.rollback()
             raise
+        finally:
+            session.close()
 
     @classmethod
     def create(cls, **kwargs):
@@ -43,19 +46,13 @@ class ActiveRecordMixin(InspectionMixin, SessionMixin):
         return cls().fill(**kwargs).save()
 
     def update(self, **kwargs):
-        """Same as :meth:`fill` method but persists changes to database.
-        """
+        """Same as :meth:`fill` method but persists changes to database."""
         return self.fill(**kwargs).save()
 
     def delete(self):
-        """Removes the model from the current entity session and mark for deletion.
-        """
-        try:
+        """Removes the model from the current entity session and mark for deletion."""
+        with self.session_scope() as session:
             self.session.delete(self)
-            self.session.commit()
-        except:
-            self.session.rollback()
-            raise
 
     @classmethod
     def destroy(cls, *ids):
@@ -63,11 +60,12 @@ class ActiveRecordMixin(InspectionMixin, SessionMixin):
         :type ids: list
         :param ids: primary key ids of records
         """
-        for pk in ids:
-            obj = cls.find(pk)
-            if obj:
-                obj.delete()
-        cls.session.flush()
+        with cls.session_scope() as session:
+            for pk in ids:
+                obj = cls.find(pk)
+                if obj:
+                    obj.delete()
+            session.flush()
 
     @classmethod
     def all(cls):
@@ -91,5 +89,6 @@ class ActiveRecordMixin(InspectionMixin, SessionMixin):
         if result:
             return result
         else:
-            raise ModelNotFoundError("{} with id '{}' was not found"
-                                     .format(cls.__name__, id_))
+            raise ModelNotFoundError(
+                "{} with id '{}' was not found".format(cls.__name__, id_)
+            )
